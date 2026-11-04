@@ -345,7 +345,7 @@ http {
 }
 `, dir, port, origin)
 	os.WriteFile(filepath.Join(dir, "nginx.conf"), []byte(conf), 0o644)
-	cmd := exec.Command(nginx, "-p", dir, "-c", filepath.Join(dir, "nginx.conf"))
+	cmd := exec.Command(nginx, "-e", filepath.Join(dir, "error.log"), "-p", dir, "-c", filepath.Join(dir, "nginx.conf"))
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
 	if err := cmd.Start(); err != nil {

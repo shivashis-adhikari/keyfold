@@ -210,7 +210,7 @@ http {
 }
 `
 			os.WriteFile(filepath.Join(dir, "nginx.conf"), []byte(conf), 0o644)
-			cmd := exec.Command(nginx, "-t", "-q", "-p", dir, "-c", filepath.Join(dir, "nginx.conf"))
+			cmd := exec.Command(nginx, "-t", "-q", "-e", filepath.Join(dir, "error.log"), "-p", dir, "-c", filepath.Join(dir, "nginx.conf"))
 			if out, err := cmd.CombinedOutput(); err != nil {
 				t.Errorf("%s canary=%v: nginx -t failed: %v\n%s\n---\n%s", mode, canary, err, out, maps)
 			}

@@ -1,0 +1,46 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
+      - name: vet
+        run: go vet ./...
+      - name: staticcheck
+        run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
+      - name: gofmt
+        run: test -z "$(gofmt -l .)"
+
+      # the config tests run generated output through the real thing
+      - name: nginx
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq nginx-light
+      - name: caddy with the cache handler
+        run: go run github.com/caddyserver/xcaddy/cmd/xcaddy@v0.4.7 build --with github.com/caddyserver/cache-handler --output "$RUNNER_TEMP/caddy"
+
+      - name: test
+        run: go test -race -count=1 ./...
+        env:
+          KEYFOLD_CADDY: ${{ runner.temp }}/caddy
+          KEYFOLD_NGINX: /usr/sbin/nginx
+
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+
+  fuzz:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      - run: go test ./internal/logs -run xxx -fuzz FuzzNginxLine -fuzztime 60s
+      - run: go test ./internal/logs -run xxx -fuzz FuzzJSONLines -fuzztime 60s
