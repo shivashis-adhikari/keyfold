@@ -20,7 +20,7 @@ type Cache interface {
 	Used() int64
 }
 
-// lists the names new accepts, in the order reports show them.
+// policy names the constructor accepts, in the order reports show them.
 var Policies = []string{"lru", "fifo", "sieve", "s3fifo", "tinylfu"}
 
 // builds a cache. objects is a rough guess at how many objects fit,
