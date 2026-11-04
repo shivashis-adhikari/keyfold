@@ -46,10 +46,11 @@ type Route struct {
 
 	// what made each kept part necessary, e.g. "color": "body differs: red blue"
 	Evidence map[string]string `json:"evidence,omitempty"`
-	// urls the prober used, and real values of the dropped params. the
-	// canary builds its test requests from these.
-	Samples []string            `json:"samples,omitempty"`
-	Values  map[string][]string `json:"values,omitempty"`
+	// urls the prober used and real values seen in the logs for query
+	// params and cookies. the canary builds its test requests from these.
+	Samples      []string            `json:"samples,omitempty"`
+	Values       map[string][]string `json:"values,omitempty"`
+	CookieValues map[string][]string `json:"cookie_values,omitempty"`
 }
 
 type Query struct {

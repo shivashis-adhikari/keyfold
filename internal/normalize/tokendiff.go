@@ -3,6 +3,7 @@ package normalize
 import (
 	"bytes"
 	"sort"
+	"strconv"
 )
 
 // a bag of words from a normalised body.
@@ -67,6 +68,26 @@ func (v *Volatile) Learn(a, b Tokens) {
 	}
 }
 
+// adds tokens to the noise set directly, for a model loaded from disk.
+func (v *Volatile) Mark(tokens []string) {
+	if v.set == nil {
+		v.set = map[string]bool{}
+	}
+	for _, t := range tokens {
+		v.set[t] = true
+	}
+}
+
+// the noise set, sorted.
+func (v *Volatile) Tokens() []string {
+	out := make([]string, 0, len(v.set))
+	for t := range v.set {
+		out = append(out, t)
+	}
+	sort.Strings(out)
+	return out
+}
+
 func (v *Volatile) Len() int { return len(v.set) }
 
 // returns tokens that differ between t and the closest baseline and
@@ -98,4 +119,32 @@ func (v *Volatile) Residual(t Tokens, limit int) []string {
 		best = best[:limit]
 	}
 	return best
+}
+
+// a coarse description of tokens that contain digits: "d6" for six
+// digits, "h16" for sixteen hex chars, "m12" for anything else alphanumeric
+// with a digit in it. ids, counters and timestamps keep their shape when
+// their value changes. tokens without digits (words) have no shape: a
+// changed word is never written off as noise this way.
+func Shape(tok string) string {
+	digits, hex := 0, true
+	for i := 0; i < len(tok); i++ {
+		c := tok[i]
+		switch {
+		case c >= '0' && c <= '9':
+			digits++
+		case c >= 'a' && c <= 'f', c >= 'A' && c <= 'F':
+		default:
+			hex = false
+		}
+	}
+	switch {
+	case digits == 0:
+		return ""
+	case digits == len(tok):
+		return "d" + strconv.Itoa(len(tok))
+	case hex:
+		return "h" + strconv.Itoa(len(tok))
+	}
+	return "m" + strconv.Itoa(len(tok))
 }

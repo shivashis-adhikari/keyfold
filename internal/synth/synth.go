@@ -105,7 +105,7 @@ func route(rr *probe.RouteResult, ir *routes.Route, opts Options) *plan.Route {
 	out := &plan.Route{
 		Host: rr.Host, Pattern: rr.Pattern, Requests: ir.Requests,
 		Cacheable: rr.Cache.Cacheable, Uncacheable: rr.Cache.Why, TTL: rr.Cache.TTL,
-		Evidence: map[string]string{}, Values: map[string][]string{},
+		Evidence: map[string]string{}, Values: map[string][]string{}, CookieValues: map[string][]string{},
 	}
 	parts := map[string]*tally{}
 	get := func(k string) *tally {
@@ -146,6 +146,13 @@ func route(rr *probe.RouteResult, ir *routes.Route, opts Options) *plan.Route {
 	queryParams(out, ir, parts, opts, flag)
 	headerParts(out, parts, vary, flag)
 	cookieParts(out, parts, vary, flag)
+	for _, c := range append(append([]string(nil), out.Cookie.Include...), out.Cookie.Presence...) {
+		if st := ir.Cookie(c); st != nil {
+			if v := topValues(st, 5); len(v) > 0 {
+				out.CookieValues[c] = v
+			}
+		}
+	}
 	checkCoverage(out, rr, opts.Mode, flag)
 	sortFlags(out.Flags)
 	return out
@@ -157,6 +164,9 @@ func queryParams(out *plan.Route, ir *routes.Route, parts map[string]*tally, opt
 	for _, prm := range ir.Params {
 		name := prm.Name
 		t := parts["query:"+name]
+		if v := topValues(prm, 5); len(v) > 0 {
+			out.Values[name] = v
+		}
 		share := 0.0
 		if ir.Requests > 0 {
 			share = float64(prm.Requests) / float64(ir.Requests)
@@ -178,10 +188,8 @@ func queryParams(out *plan.Route, ir *routes.Route, parts map[string]*tally, opt
 				continue
 			}
 			out.Query.Drop = append(out.Query.Drop, name)
-			out.Values[name] = topValues(prm, 5)
 		case t == nil && opts.TrustTrackers && routes.IsTracker(name):
 			out.Query.Drop = append(out.Query.Drop, name)
-			out.Values[name] = topValues(prm, 5)
 			flag(plan.Info, "dropped-by-name", name, "%s was never probed, dropped because it is a known tracker", name)
 		default:
 			out.Query.Unverified = append(out.Query.Unverified, name)
