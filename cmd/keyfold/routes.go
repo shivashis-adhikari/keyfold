@@ -22,6 +22,12 @@ func (l *logFlags) register(fs *flag.FlagSet) {
 	fs.StringVar(&l.nginxFormat, "nginx-format", "", "nginx log_format string, if not the default combined format")
 	fs.StringVar(&l.host, "host", "", "host for log lines that don't carry one (nginx combined doesn't)")
 	fs.StringVar(&l.scheme, "scheme", "https", "scheme for log lines that don't carry one")
+}
+
+// commands that infer routes themselves also take the folding threshold.
+// sim doesn't: its routes come from the plan.
+func (l *logFlags) registerRoutes(fs *flag.FlagSet) {
+	l.register(fs)
 	fs.IntVar(&l.collapse, "collapse", 20, "distinct literal path segments at one position before they fold into {slug}")
 }
 
@@ -70,7 +76,7 @@ func reportSkipped(w io.Writer, sc *logs.Scanner) {
 func cmdRoutes(args []string, stdout, stderr io.Writer) error {
 	fs := newFlags("routes", "logs...", stderr)
 	var lf logFlags
-	lf.register(fs)
+	lf.registerRoutes(fs)
 	top := fs.Int("top", 25, "routes to show")
 	asJSON := fs.Bool("json", false, "print the full inventory as json")
 	if err := fs.Parse(args); err != nil {

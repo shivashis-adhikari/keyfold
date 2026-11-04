@@ -13,8 +13,8 @@ type Pair struct {
 	Raw   string // exactly as it appeared, used when rebuilding keys
 }
 
-// splits a raw query without normalising it. the stdlib query parser would lose the
-// original order and encoding, and both matter for cache keys: cdns compare
+// splits a raw query without normalising it. the stdlib parser would lose
+// the original order and encoding, and both matter for cache keys: cdns compare
 // the bytes, not the meaning.
 func SplitQuery(raw string) []Pair {
 	if raw == "" {

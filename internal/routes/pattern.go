@@ -220,7 +220,7 @@ func Regex(pattern string) string {
 	return b.String()
 }
 
-// like regexp.quotemeta but with character classes instead of backslashes
+// like the stdlib's regex quoting, but with character classes instead of backslashes
 // where it can. the output ends up inside caddyfiles, nginx strings and json,
 // each with its own idea of what a backslash means; caddy's cache handler
 // even fails to re-encode one.

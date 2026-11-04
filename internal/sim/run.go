@@ -167,8 +167,8 @@ func newCache(t *Trace, policy string, capacity int64) cache.Cache {
 	return c
 }
 
-// one pass over the trace. perroute, when not nil, gets stats per plan
-// route (last slot for requests outside the plan).
+// one pass over the trace. a non-nil per-route slice also collects stats
+// per plan route, with the last slot for requests outside the plan.
 func replay(t *Trace, policy string, capacity int64, prop bool, perRoute []Stats) Stats {
 	c := newCache(t, policy, capacity)
 	keys := t.Cur

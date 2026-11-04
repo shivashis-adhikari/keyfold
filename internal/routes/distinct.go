@@ -5,8 +5,8 @@ import (
 	"math/bits"
 )
 
-// counts distinct 64-bit hashes. exact up to a couple thousand, then a hyperloglog
-// with 2^12 registers (about 1.6% standard error, 4kb). per-route url
+// counts distinct 64-bit hashes. exact up to a couple thousand, then a
+// hyperloglog with 2^12 registers (about 1.6% standard error, 4kb). per-route url
 // counts on a busy site run into the millions, and we keep a few of these
 // for every route and every param.
 type distinct struct {

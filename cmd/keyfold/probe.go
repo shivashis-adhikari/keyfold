@@ -19,7 +19,7 @@ import (
 func cmdProbe(args []string, stdout, stderr io.Writer) error {
 	fs := newFlags("probe", "-origin url logs...", stderr)
 	var lf logFlags
-	lf.register(fs)
+	lf.registerRoutes(fs)
 	origin := fs.String("origin", "", "origin to probe, e.g. http://10.0.3.7:8080. not the cdn")
 	hostHeader := fs.String("host-header", "", "host header to send (default: the host from the logs)")
 	nRoutes := fs.Int("routes", 25, "busiest cacheable routes to probe")

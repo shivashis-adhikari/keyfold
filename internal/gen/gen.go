@@ -8,8 +8,8 @@ import (
 	"github.com/shivashis-adhikari/keyfold/internal/plan"
 )
 
-// gates every generated rule in canary mode. only requests
-// carrying it get the new key, and the header is part of the key, so canary
+// the request header that gates every generated rule in canary mode. only
+// requests carrying it get the new key, and the header is part of the key, so canary
 // entries never mix with what real users are served.
 const CanaryHeader = "X-Keyfold-Canary"
 

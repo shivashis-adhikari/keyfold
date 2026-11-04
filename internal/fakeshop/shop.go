@@ -1,7 +1,7 @@
 // package fakeshop is a small origin with known cache key behaviour, plus a
 // traffic generator for it. tests and the demo in the readme run keyfold
-// against it, so every quirk here is deliberate and the expected verdicts
-// are listed in truth.go.
+// against it, so every quirk here is deliberate. the probe, synth and
+// canary tests spell out the verdicts each one should produce.
 package fakeshop
 
 import (

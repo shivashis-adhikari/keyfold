@@ -260,7 +260,7 @@ func (f Fingerprint) Diff(o Fingerprint) string {
 	return ""
 }
 
-// diff ignoring the body.
+// true when everything but the body matches.
 func (f Fingerprint) SameMeta(o Fingerprint) bool {
 	o.Body, o.Size = f.Body, f.Size
 	return f.Diff(o) == ""
