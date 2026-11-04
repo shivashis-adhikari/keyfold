@@ -56,9 +56,20 @@ func (v *Volatile) Add(t Tokens) {
 	v.bases = append(v.bases, t)
 }
 
+// marks everything that differs between two responses to the same request
+// as noise, without making either of them a baseline.
+func (v *Volatile) Learn(a, b Tokens) {
+	if v.set == nil {
+		v.set = map[string]bool{}
+	}
+	for k := range changed(a, b) {
+		v.set[k] = true
+	}
+}
+
 func (v *Volatile) Len() int { return len(v.set) }
 
-// returns tokens that differ between t and the first baseline and
+// returns tokens that differ between t and the closest baseline and
 // are not known to be volatile, sorted, at most limit of them. an empty
 // result means t looks like just another baseline.
 //
@@ -67,18 +78,24 @@ func (v *Volatile) Len() int { return len(v.set) }
 // cheap mistake (a param kept that could have been dropped), the other one
 // serves wrong pages.
 func (v *Volatile) Residual(t Tokens, limit int) []string {
-	if len(v.bases) == 0 {
-		return nil
-	}
-	var out []string
-	for k := range changed(v.bases[0], t) {
-		if !v.set[k] {
-			out = append(out, k)
+	var best []string
+	for i, b := range v.bases {
+		var out []string
+		for k := range changed(b, t) {
+			if !v.set[k] {
+				out = append(out, k)
+			}
+		}
+		if i == 0 || len(out) < len(best) {
+			best = out
+		}
+		if len(best) == 0 {
+			return nil
 		}
 	}
-	sort.Strings(out)
-	if limit > 0 && len(out) > limit {
-		out = out[:limit]
+	sort.Strings(best)
+	if limit > 0 && len(best) > limit {
+		best = best[:limit]
 	}
-	return out
+	return best
 }

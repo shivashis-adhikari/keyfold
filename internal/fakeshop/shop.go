@@ -88,7 +88,9 @@ func h32(parts ...string) uint32 {
 // the origin. it is safe for concurrent use.
 type Shop struct {
 	mux     *http.ServeMux
-	counter atomic.Uint64
+	counter atomic.Uint64 // every request, for the served-by comment
+	deals   atomic.Uint64 // home page requests
+	members atomic.Uint64 // api requests
 	now     func() time.Time
 }
 
@@ -169,7 +171,8 @@ func canonical(r *http.Request, path string) string {
 }
 
 func (s *Shop) home(w http.ResponseWriter, r *http.Request) {
-	n := s.counter.Add(1)
+	s.counter.Add(1)
+	n := s.deals.Add(1)
 	// "deal of the hour" flips on every request, so two identical requests
 	// never return the same page. the prober has to learn that.
 	deal := []string{"socks", "hats"}[n%2]
@@ -284,7 +287,8 @@ func (s *Shop) search(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Shop) item(w http.ResponseWriter, r *http.Request) {
-	n := s.counter.Add(1)
+	s.counter.Add(1)
+	n := s.members.Add(1)
 	id, err := strconv.Atoi(r.PathValue("id"))
 	if err != nil || id < 1 || id > 5000 {
 		w.Header().Set("Cache-Control", "public, max-age=60")

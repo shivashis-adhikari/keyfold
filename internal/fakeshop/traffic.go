@@ -291,11 +291,13 @@ func (g *gen) next(t time.Time) genReq {
 		req.bytes = 9000 + int64(g.r.IntN(800))
 	}
 	if g.chance(0.004) {
+		// dead links from old campaigns
 		req.path = "/products/discontinued-thing-" + strconv.Itoa(g.r.IntN(50))
 		req.status = 404
 		req.bytes = 15
 		req.ttl = 60 * time.Second
 		req.private = false
+		params, req.referer = g.tracking(nil, 1)
 	}
 	// people paste links, apps rebuild them, a fair share arrives with the
 	// params in some other order

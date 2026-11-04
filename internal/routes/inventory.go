@@ -53,6 +53,7 @@ type Value struct {
 // look like a credential.
 type Sample struct {
 	URI     string            `json:"uri"`
+	Status  int               `json:"status"`
 	Header  map[string]string `json:"header,omitempty"`
 	Cookies map[string]string `json:"cookies,omitempty"`
 }
@@ -241,12 +242,16 @@ func (b *Builder) sample(a *acc, r *logs.Record, pairs []Pair) {
 		}
 		return *s
 	}
-	for _, p := range pairs {
-		if a.coverage == nil {
-			a.coverage = map[string]Sample{}
-		}
-		if _, ok := a.coverage[p.Name]; !ok {
-			a.coverage[p.Name] = mk()
+	// error pages make poor baselines, so only 2xx responses count for
+	// param coverage. they still go into the reservoir.
+	if r.Status >= 200 && r.Status < 300 {
+		for _, p := range pairs {
+			if a.coverage == nil {
+				a.coverage = map[string]Sample{}
+			}
+			if _, ok := a.coverage[p.Name]; !ok {
+				a.coverage[p.Name] = mk()
+			}
 		}
 	}
 	// plain reservoir sampling, so samples follow traffic
@@ -259,7 +264,7 @@ func (b *Builder) sample(a *acc, r *logs.Record, pairs []Pair) {
 }
 
 func makeSample(r *logs.Record) Sample {
-	s := Sample{URI: r.URI()}
+	s := Sample{URI: r.URI(), Status: r.Status}
 	for _, h := range sampleHeaders {
 		if v := r.Header[h]; v != "" {
 			if s.Header == nil {
