@@ -200,9 +200,32 @@ func Regex(pattern string) string {
 	return b.String()
 }
 
+// like regexp.quotemeta but with character classes instead of backslashes
+// where it can. the output ends up inside caddyfiles, nginx strings and json,
+// each with its own idea of what a backslash means; caddy's cache handler
+// even fails to re-encode one.
+func quoteMeta(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch c {
+		case '.', '+', '*', '?', '(', ')', '|', '[', '{', '}', '$':
+			b.WriteByte('[')
+			b.WriteByte(c)
+			b.WriteByte(']')
+		case '\\', '^', ']':
+			b.WriteByte('\\')
+			b.WriteByte(c)
+		default:
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
+}
+
 func segRegex(seg string) string {
 	if !isPlaceholder(seg) {
-		return regexp.QuoteMeta(seg)
+		return quoteMeta(seg)
 	}
 	base, ext := seg, ""
 	if i := strings.IndexByte(seg, '}'); i >= 0 {
@@ -226,7 +249,7 @@ func segRegex(seg string) string {
 		if r == `[^/]+` {
 			r = `[^/]+?`
 		}
-		r += regexp.QuoteMeta(ext)
+		r += quoteMeta(ext)
 	}
 	return r
 }
@@ -254,3 +277,6 @@ func SegmentCount(pattern string) int { return len(splitPath(pattern)) }
 
 // reports whether the pattern matches more than one path.
 func HasPlaceholder(pattern string) bool { return strings.Contains(pattern, "{") }
+
+// regex-escapes s the same way patterns are escaped.
+func QuoteMeta(s string) string { return quoteMeta(s) }

@@ -208,7 +208,7 @@ func TestRegexAndWildcard(t *testing.T) {
 		yes, no     []string
 	}{
 		{"/products/{slug}", `^/products/[^/]+$`, "/products/*", []string{"/products/a-b"}, []string{"/products/a/b", "/products/"}},
-		{"/static/{asset}.js", `^/static/[^/]+?\.js$`, "/static/*.js", []string{"/static/app.123abc.js"}, []string{"/static/app.css"}},
+		{"/static/{asset}.js", `^/static/[^/]+?[.]js$`, "/static/*.js", []string{"/static/app.123abc.js"}, []string{"/static/app.css"}},
 		{"/api/v1/items/{int}", `^/api/v1/items/[0-9]+$`, "/api/v1/items/*", []string{"/api/v1/items/9"}, []string{"/api/v1/items/x"}},
 		{"/", `^/$`, "/", []string{"/"}, []string{"/a"}},
 	}
