@@ -1,0 +1,7 @@
+/keyfold
+/fakeshop
+/dist/
+*.test
+*.out
+/out/
+testdata/fuzz/
