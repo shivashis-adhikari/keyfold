@@ -253,3 +253,22 @@ func FuzzJSONLines(f *testing.F) {
 		caddyParser{}.parse([]byte(line), &r)
 	})
 }
+
+func benchParse(b *testing.B, p lineParser, line string) {
+	b.SetBytes(int64(len(line)))
+	b.ReportAllocs()
+	raw := []byte(line)
+	for i := 0; i < b.N; i++ {
+		var r Record
+		if err := p.parse(raw, &r); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkCloudflare(b *testing.B) { benchParse(b, cloudflareParser{}, cfLineHit) }
+func BenchmarkCaddy(b *testing.B)      { benchParse(b, caddyParser{}, caddyLineTLS) }
+func BenchmarkNginx(b *testing.B) {
+	p, _ := newNginxParser("")
+	benchParse(b, p, nginxLine)
+}

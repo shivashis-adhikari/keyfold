@@ -23,13 +23,17 @@ type Inventory struct {
 }
 
 type Route struct {
-	Host        string   `json:"host"`
-	Pattern     string   `json:"pattern"`
-	Requests    int64    `json:"requests"`
-	Cacheable   int64    `json:"cacheable"`
-	Bytes       int64    `json:"bytes"`
-	UniqueURLs  int64    `json:"unique_urls"`
-	UniquePaths int64    `json:"unique_paths"`
+	Host        string `json:"host"`
+	Pattern     string `json:"pattern"`
+	Requests    int64  `json:"requests"`
+	Cacheable   int64  `json:"cacheable"`
+	Bytes       int64  `json:"bytes"`
+	UniqueURLs  int64  `json:"unique_urls"`
+	UniquePaths int64  `json:"unique_paths"`
+	// what the cdn said about these requests, when the log has a cache
+	// status field
+	CDNHits     int64    `json:"cdn_hits,omitempty"`
+	CDNStatuses int64    `json:"cdn_statuses,omitempty"`
 	Params      []*Param `json:"params,omitempty"`
 	Cookies     []*Param `json:"cookies,omitempty"`
 	Samples     []Sample `json:"samples,omitempty"`
@@ -136,6 +140,7 @@ type acc struct {
 	segs []string
 
 	requests, cacheable, bytes int64
+	cdnHits, cdnStatuses       int64
 	urls, paths                distinct
 	params, cookies            map[string]*paramAcc
 
@@ -170,6 +175,17 @@ func IsCacheableStatus(code int) bool {
 	return false
 }
 
+// whether a cdn cache status means the response came from cache.
+// cloudflare's revalidated and updating count, they were served from the
+// edge copy.
+func IsHitStatus(s string) bool {
+	switch s {
+	case "hit", "stale", "updating", "revalidated", "stream_hit":
+		return true
+	}
+	return false
+}
+
 func (b *Builder) Add(r *logs.Record) {
 	b.requests++
 	if !r.Time.IsZero() {
@@ -199,6 +215,12 @@ func (b *Builder) Add(r *logs.Record) {
 	}
 	a.requests++
 	a.bytes += r.Bytes
+	if r.CacheStatus != "" {
+		a.cdnStatuses++
+		if IsHitStatus(r.CacheStatus) {
+			a.cdnHits++
+		}
+	}
 	a.urls.add(hashString(r.Path + "?" + r.RawQuery))
 	a.paths.add(hashString(r.Path))
 
@@ -335,6 +357,8 @@ func (b *Builder) merge(host, pattern string, accs []*acc) *Route {
 		r.Requests += a.requests
 		r.Cacheable += a.cacheable
 		r.Bytes += a.bytes
+		r.CDNHits += a.cdnHits
+		r.CDNStatuses += a.cdnStatuses
 		urls.merge(&a.urls)
 		paths.merge(&a.paths)
 		mergeParams(params, a.params, b.opts.MaxValues)

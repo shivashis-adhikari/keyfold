@@ -38,8 +38,11 @@ type Trace struct {
 
 	HasHeaders bool
 	HasCookies bool
-	Routes     []string // "host pattern" per plan route
-	Parse      []string // a few parse errors, for the summary
+	// request header and cookie names that showed up at least once
+	HeaderNames map[string]bool
+	CookieNames map[string]bool
+	Routes      []string // "host pattern" per plan route
+	Parse       []string // a few parse errors, for the summary
 }
 
 func (t *Trace) Len() int { return len(t.Time) }
@@ -62,7 +65,7 @@ func Build(sc *logs.Scanner, p *plan.Plan, opts BuildOptions) (*Trace, error) {
 		opts.DefaultTTL = time.Hour
 	}
 	k := plan.NewKeyer(p)
-	t := &Trace{}
+	t := &Trace{HeaderNames: map[string]bool{}, CookieNames: map[string]bool{}}
 	for _, r := range p.Routes {
 		t.Routes = append(t.Routes, r.Host+" "+r.Pattern)
 		ttl := time.Duration(r.TTL) * time.Second
@@ -89,9 +92,19 @@ func Build(sc *logs.Scanner, p *plan.Plan, opts BuildOptions) (*Trace, error) {
 		}
 		if len(r.Header) > 0 {
 			t.HasHeaders = true
+			for h := range r.Header {
+				if !t.HeaderNames[h] {
+					t.HeaderNames[h] = true
+				}
+			}
 		}
 		if len(r.Cookies) > 0 {
 			t.HasCookies = true
+			for c := range r.Cookies {
+				if !t.CookieNames[c] {
+					t.CookieNames[c] = true
+				}
+			}
 		}
 		ms := r.Time.UnixMilli()
 		if t.Start.IsZero() || r.Time.Before(t.Start) {
@@ -114,13 +127,11 @@ func Build(sc *logs.Scanner, p *plan.Plan, opts BuildOptions) (*Trace, error) {
 		curSeen[cur] = r.Bytes
 		propSeen[prop] = r.Bytes
 
-		switch r.CacheStatus {
-		case "":
-		case "hit", "stale", "updating", "revalidated":
-			t.ObservedHits++
+		if r.CacheStatus != "" {
 			t.ObservedTotal++
-		default:
-			t.ObservedTotal++
+			if routes.IsHitStatus(r.CacheStatus) {
+				t.ObservedHits++
+			}
 		}
 	}
 	t.Lines, t.Skipped, t.Parse = sc.Lines, sc.Skipped, sc.Errors
@@ -198,7 +209,44 @@ func ratio(a, b int) float64 {
 	return float64(a) / float64(b)
 }
 
+// the key parts the plan uses that the logs never carried. the simulator
+// sees the same empty value for all of them, so it merges entries the real
+// cache would keep apart and the planned side looks better than it is.
+func (t *Trace) Unsimulated(p *plan.Plan) []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(s string) {
+		if !seen[s] {
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
+	for _, r := range p.Routes {
+		if r.Header.Lang && !t.HeaderNames["accept-language"] {
+			add("header accept-language")
+		}
+		if r.Header.Device && !t.HeaderNames["user-agent"] {
+			add("header user-agent")
+		}
+		for _, h := range r.Header.Include {
+			if !t.HeaderNames[h] {
+				add("header " + h)
+			}
+		}
+		for _, c := range append(append([]string(nil), r.Cookie.Include...), r.Cookie.Presence...) {
+			if !t.CookieNames[c] {
+				add("cookie " + c)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 func HumanBytes(n int64) string {
+	if n < 0 {
+		return "-" + HumanBytes(-n)
+	}
 	const unit = 1024
 	if n < unit {
 		return fmt.Sprintf("%d B", n)

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"strings"
 )
 
@@ -20,6 +21,8 @@ type Options struct {
 	// combined format.
 	DefaultHost   string
 	DefaultScheme string
+	// parser goroutines. 0 means one per cpu.
+	Workers int
 }
 
 type lineParser interface {
@@ -29,27 +32,43 @@ type lineParser interface {
 // how many parse errors to keep around for the summary.
 const keepErrors = 5
 
+// lines per unit of work handed to a parser goroutine
+const batchSize = 2048
+
 // reads records from one or more log files in order. gzip input is
 // detected from the magic bytes, and "-" reads stdin.
 //
-// the record returned by record() is overwritten by the next call to scan().
-// its maps are fresh on every line, so a shallow copy is safe to keep.
+// json decoding is most of the cost of reading cdn logs, so lines are
+// parsed on every core in batches and handed back in file order. the record
+// returned by record() is overwritten by the next call to scan(). its maps
+// are fresh on every line, so a shallow copy is safe to keep.
 type Scanner struct {
 	opts  Options
 	paths []string
 
-	file   io.Closer
-	lines  *bufio.Scanner
-	parser lineParser
-	name   string
-	lineNo int64
+	started bool
+	order   chan *batch
+	stop    chan struct{}
 
-	rec Record
+	cur *batch
+	pos int
+	rec *Record
 	err error
 
 	Lines   int64
 	Skipped int64
 	Errors  []string
+}
+
+type batch struct {
+	file   string
+	parser lineParser
+	lines  [][]byte
+	nums   []int64
+	recs   []Record
+	errs   []error
+	err    error // file level: couldn't open, bad gzip, read error
+	done   chan struct{}
 }
 
 // returns a scanner over the given files. nothing is opened until the
@@ -58,121 +77,201 @@ func Open(paths []string, opts Options) *Scanner {
 	if len(paths) == 0 {
 		paths = []string{"-"}
 	}
+	if opts.Workers <= 0 {
+		opts.Workers = runtime.GOMAXPROCS(0)
+	}
 	return &Scanner{opts: opts, paths: paths}
 }
 
-func (s *Scanner) Scan() bool {
-	for s.err == nil {
-		if s.lines == nil {
-			if len(s.paths) == 0 {
-				return false
+func (s *Scanner) start() {
+	s.started = true
+	work := make(chan *batch, s.opts.Workers)
+	s.order = make(chan *batch, 2*s.opts.Workers)
+	s.stop = make(chan struct{})
+	for i := 0; i < s.opts.Workers; i++ {
+		go func() {
+			for b := range work {
+				b.parse(s.opts)
+				close(b.done)
 			}
-			if err := s.next(); err != nil {
-				s.err = err
-				return false
-			}
-			continue
-		}
-		if !s.lines.Scan() {
-			if err := s.lines.Err(); err != nil {
-				s.err = fmt.Errorf("%s: %w", s.name, err)
-			}
-			s.closeFile()
-			continue
-		}
-		s.lineNo++
-		line := bytes.TrimRight(s.lines.Bytes(), "\r ")
-		if len(bytes.TrimSpace(line)) == 0 {
-			continue
-		}
-		s.Lines++
-		s.rec = Record{}
-		if err := s.parser.parse(line, &s.rec); err != nil {
-			s.Skipped++
-			if len(s.Errors) < keepErrors && !errors.Is(err, errNotAccessLine) {
-				s.Errors = append(s.Errors, fmt.Sprintf("%s:%d: %v", s.name, s.lineNo, err))
-			}
-			continue
-		}
-		if s.rec.Host == "" {
-			s.rec.Host = cleanHost(s.opts.DefaultHost)
-		}
-		if s.rec.Scheme == "" {
-			s.rec.Scheme = s.opts.DefaultScheme
-			if s.rec.Scheme == "" {
-				s.rec.Scheme = "https"
-			}
-		}
-		if s.rec.Method == "" {
-			s.rec.Method = "GET"
-		}
-		return true
+		}()
 	}
-	return false
+	go func() {
+		defer close(work)
+		defer close(s.order)
+		for _, p := range s.paths {
+			if !s.readFile(p, work) {
+				return
+			}
+		}
+	}()
 }
 
-func (s *Scanner) Record() *Record { return &s.rec }
-
-func (s *Scanner) Err() error { return s.err }
-
-func (s *Scanner) Close() error {
-	s.closeFile()
-	s.paths = nil
-	return nil
-}
-
-func (s *Scanner) closeFile() {
-	if s.file != nil {
-		s.file.Close()
+// feeds one file to the workers. false means stop everything.
+func (s *Scanner) readFile(path string, work chan<- *batch) bool {
+	name := path
+	if path == "-" {
+		name = "stdin"
 	}
-	s.file, s.lines, s.parser = nil, nil, nil
-}
-
-func (s *Scanner) next() error {
-	path := s.paths[0]
-	s.paths = s.paths[1:]
-	s.name, s.lineNo = path, 0
+	send := func(b *batch) bool {
+		select {
+		case s.order <- b:
+		case <-s.stop:
+			return false
+		}
+		if b.err != nil || len(b.lines) == 0 {
+			close(b.done)
+			return true
+		}
+		select {
+		case work <- b:
+			return true
+		case <-s.stop:
+			return false
+		}
+	}
+	fail := func(err error) bool {
+		send(&batch{file: name, err: err, done: make(chan struct{})})
+		return false
+	}
 
 	var f io.ReadCloser = os.Stdin
 	if path != "-" {
 		var err error
 		if f, err = os.Open(path); err != nil {
-			return err
+			return fail(err)
 		}
-	} else {
-		s.name = "stdin"
 	}
+	defer f.Close()
 	br := bufio.NewReaderSize(f, 256<<10)
-	var r io.Reader = br
+	r := br
 	if magic, _ := br.Peek(2); len(magic) == 2 && magic[0] == 0x1f && magic[1] == 0x8b {
 		gz, err := gzip.NewReader(br)
 		if err != nil {
-			f.Close()
-			return fmt.Errorf("%s: %w", s.name, err)
+			return fail(fmt.Errorf("%s: %w", name, err))
 		}
 		r = bufio.NewReaderSize(gz, 256<<10)
 	}
-
 	format := s.opts.Format
 	if format == Auto {
-		peek := r.(*bufio.Reader)
 		var err error
-		if format, err = sniff(peek); err != nil {
-			f.Close()
-			return fmt.Errorf("%s: %w", s.name, err)
+		if format, err = sniff(r); err != nil {
+			return fail(fmt.Errorf("%s: %w", name, err))
 		}
 	}
 	p, err := newParser(format, s.opts.NginxFormat)
 	if err != nil {
-		f.Close()
-		return err
+		return fail(err)
 	}
 
 	sc := bufio.NewScanner(r)
 	// caddy lines with big header maps get long. 4mb is plenty and still
 	// catches a file that isn't line oriented at all.
 	sc.Buffer(make([]byte, 0, 64<<10), 4<<20)
-	s.file, s.lines, s.parser = f, sc, p
+	var lineNo int64
+	b := &batch{file: name, parser: p, done: make(chan struct{})}
+	for sc.Scan() {
+		lineNo++
+		line := bytes.TrimRight(sc.Bytes(), "\r ")
+		if len(bytes.TrimSpace(line)) == 0 {
+			continue
+		}
+		b.lines = append(b.lines, append([]byte(nil), line...))
+		b.nums = append(b.nums, lineNo)
+		if len(b.lines) == batchSize {
+			if !send(b) {
+				return false
+			}
+			b = &batch{file: name, parser: p, done: make(chan struct{})}
+		}
+	}
+	if len(b.lines) > 0 && !send(b) {
+		return false
+	}
+	if err := sc.Err(); err != nil {
+		return fail(fmt.Errorf("%s: %w", name, err))
+	}
+	return true
+}
+
+func (b *batch) parse(opts Options) {
+	b.recs = make([]Record, len(b.lines))
+	b.errs = make([]error, len(b.lines))
+	host := cleanHost(opts.DefaultHost)
+	scheme := opts.DefaultScheme
+	if scheme == "" {
+		scheme = "https"
+	}
+	for i, line := range b.lines {
+		r := &b.recs[i]
+		if err := b.parser.parse(line, r); err != nil {
+			b.errs[i] = err
+			continue
+		}
+		if r.Host == "" {
+			r.Host = host
+		}
+		if r.Scheme == "" {
+			r.Scheme = scheme
+		}
+		if r.Method == "" {
+			r.Method = "GET"
+		}
+	}
+	b.lines = nil
+}
+
+func (s *Scanner) Scan() bool {
+	if !s.started {
+		s.start()
+	}
+	for s.err == nil {
+		if s.cur != nil && s.pos < len(s.cur.recs) {
+			i := s.pos
+			s.pos++
+			s.Lines++
+			if err := s.cur.errs[i]; err != nil {
+				s.Skipped++
+				if len(s.Errors) < keepErrors && !errors.Is(err, errNotAccessLine) {
+					s.Errors = append(s.Errors, fmt.Sprintf("%s:%d: %v", s.cur.file, s.cur.nums[i], err))
+				}
+				continue
+			}
+			s.rec = &s.cur.recs[i]
+			return true
+		}
+		b, ok := <-s.order
+		if !ok {
+			return false
+		}
+		<-b.done
+		if b.err != nil {
+			s.err = b.err
+			return false
+		}
+		s.cur, s.pos = b, 0
+	}
+	return false
+}
+
+func (s *Scanner) Record() *Record { return s.rec }
+
+func (s *Scanner) Err() error { return s.err }
+
+// stops the reader and the parsers. safe to call more than once.
+func (s *Scanner) Close() error {
+	if s.started && s.stop != nil {
+		select {
+		case <-s.stop:
+		default:
+			close(s.stop)
+		}
+		// drain so the reader goroutine can see the stop and exit
+		go func(ch chan *batch) {
+			for range ch {
+			}
+		}(s.order)
+	}
 	return nil
 }
 

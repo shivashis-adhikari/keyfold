@@ -72,8 +72,6 @@ func rank(v string) int {
 	return 0
 }
 
-func (t *tally) total() int { return t.changes + t.noise + t.unknown + t.failed }
-
 func Synthesize(rep *probe.Report, opts Options) *plan.Plan {
 	if opts.Mode == "" {
 		opts.Mode = plan.Safe

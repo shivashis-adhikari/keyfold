@@ -219,8 +219,10 @@ func Run(ctx context.Context, inv *routes.Inventory, opts Options) (*Report, err
 						changes++
 					}
 				}
+				p.mu.Lock()
 				fmt.Fprintf(opts.Progress, "  %-36s %s  %d requests, %d of %d parts change the response\n",
 					trim(j.route.Pattern, 36), trim(j.sample.URI, 60), sr.Requests, changes, len(sr.Results))
+				p.mu.Unlock()
 			}
 		}()
 	}

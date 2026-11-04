@@ -3,7 +3,6 @@
 package routes
 
 import (
-	"regexp"
 	"strings"
 )
 
@@ -21,10 +20,31 @@ const (
 	phAsset = "{asset}"
 )
 
-var (
-	uuidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
-	dateRe = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
-)
+// 8-4-4-4-12 hex. checked by hand, this runs for every path segment of
+// every log line and a regex was a tenth of the inventory's cpu time.
+func isUUID(s string) bool {
+	if len(s) != 36 {
+		return false
+	}
+	for i := 0; i < 36; i++ {
+		switch i {
+		case 8, 13, 18, 23:
+			if s[i] != '-' {
+				return false
+			}
+		default:
+			if !isHex(s[i : i+1]) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// yyyy-mm-dd
+func isDate(s string) bool {
+	return len(s) == 10 && s[4] == '-' && s[7] == '-' && allDigits(s[:4]) && allDigits(s[5:7]) && allDigits(s[8:])
+}
 
 // maps one raw path segment to itself or to a placeholder. this is the cheap
 // first pass. high-cardinality literal segments (product slugs and the like)
@@ -35,9 +55,9 @@ func classify(seg string) string {
 		return ""
 	case allDigits(seg):
 		return phInt
-	case uuidRe.MatchString(seg):
+	case isUUID(seg):
 		return phUUID
-	case dateRe.MatchString(seg):
+	case isDate(seg):
 		return phDate
 	case len(seg) >= 12 && isHex(seg) && hasDigit(seg) && hasLetter(seg):
 		return phHex
@@ -173,9 +193,9 @@ func segMatches(pat, seg string) bool {
 	case phInt:
 		return allDigits(seg)
 	case phUUID:
-		return uuidRe.MatchString(seg)
+		return isUUID(seg)
 	case phDate:
-		return dateRe.MatchString(seg)
+		return isDate(seg)
 	case phHex:
 		return isHex(seg)
 	case phToken:

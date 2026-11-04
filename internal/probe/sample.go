@@ -417,14 +417,18 @@ func escapeValue(v string) string {
 
 func (p *prober) sample(ctx context.Context, r *routes.Route, smp routes.Sample, headers bool) (*SampleResult, CacheInfo) {
 	sr := &SampleResult{URI: smp.URI}
-	before := p.count()
-	defer func() { sr.Requests = p.count() - before }()
+	// counted here rather than from the shared total, other workers are
+	// sending requests at the same time
+	get := func(s spec) fetched {
+		sr.Requests++
+		return p.fetch(ctx, s)
+	}
 
 	base := p.baseSpec(r, smp)
 	var b baseline
 	var ci CacheInfo
 	for i := 0; i < p.opts.Baselines; i++ {
-		f := p.fetch(ctx, base)
+		f := get(base)
 		if f.err != nil {
 			sr.Error = f.err.Error()
 			return sr, CacheInfo{Why: "baseline request failed: " + f.err.Error()}
@@ -437,10 +441,10 @@ func (p *prober) sample(ctx context.Context, r *routes.Route, smp routes.Sample,
 	sr.Baseline = b.fps[0]
 
 	for _, v := range p.variants(r, base, headers) {
-		f := p.fetch(ctx, v.s)
+		f := get(v.s)
 		verdict, detail, confirm := b.judge(f)
 		if confirm {
-			verdict, detail = p.confirm(ctx, &b, base, v.s, f)
+			verdict, detail = confirmDiff(ctx, get, &b, base, v.s, f)
 		}
 		sr.Results = append(sr.Results, Result{Part: v.part, Name: v.name, Op: v.op, Value: v.value, Verdict: verdict, Detail: detail})
 		if ctx.Err() != nil {
@@ -451,7 +455,7 @@ func (p *prober) sample(ctx context.Context, r *routes.Route, smp routes.Sample,
 	// one more baseline at the end. if it no longer looks like the first
 	// ones, the page changed while we were probing (a deploy, a price
 	// update) and the "changes" verdicts are suspect.
-	if f := p.fetch(ctx, base); f.err == nil {
+	if f := get(base); f.err == nil {
 		if v, _, _ := b.judge(f); v != Noise {
 			sr.Drifted = true
 		}
@@ -467,8 +471,8 @@ func (p *prober) sample(ctx context.Context, r *routes.Route, smp routes.Sample,
 // difference either goes away or has survived enough rounds. pages that were
 // already unstable get more rounds, since rotating content needs more
 // samples before every variant of it has shown up once.
-func (p *prober) confirm(ctx context.Context, b *baseline, base, vs spec, first fetched) (string, string) {
-	second := p.fetch(ctx, vs)
+func confirmDiff(ctx context.Context, get func(spec) fetched, b *baseline, base, vs spec, first fetched) (string, string) {
+	second := get(vs)
 	if second.err != nil {
 		return Unknown, "confirmation failed: " + second.err.Error()
 	}
@@ -476,7 +480,7 @@ func (p *prober) confirm(ctx context.Context, b *baseline, base, vs spec, first 
 	rounds := 2
 	var v1, d1, v2 string
 	for i := 0; i < rounds; i++ {
-		if f := p.fetch(ctx, base); f.err == nil {
+		if f := get(base); f.err == nil {
 			b.add(f)
 		}
 		if !b.stable() {
@@ -495,10 +499,4 @@ func (p *prober) confirm(ctx context.Context, b *baseline, base, vs spec, first 
 		return Changes, d1
 	}
 	return Unknown, d1
-}
-
-func (p *prober) count() int {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.sent
 }
